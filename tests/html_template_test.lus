@@ -1,6 +1,6 @@
 local ROOT = string.match(TEST_DIR, "^(.*)[/\\][^/\\]*$")
 pledge("load", "fs")
-package.path = ROOT .. "/?.lus;" .. package.path
+package.path = `$ROOT/?.lus;$(package.path)`
 
 local template = require("html_template")
 
@@ -90,7 +90,7 @@ local function helpers_test()
             link = function(url, text, options)
                 return template.safe(`<a href="$(template.escape(url))" class="$(template.escape(options.hash.class or ""))">$(template.escape(text))</a>`)
             end,
-            bold = function(options) return template.safe("<b>" .. options.fn() .. "</b>") end,
+            bold = function(options) return template.safe(`<b>$(options.fn())</b>`) end,
         },
     })
     assert(env:compile("{{ upper name }}")({ name = "<x>" }) == "&lt;X&gt;")
@@ -142,7 +142,7 @@ local function env_files_test()
     local dir = os.tmpname() .. ".d"
     fs.createdirectory(dir)
     local function write(name, text)
-        local f <close> = io.open(dir .. "/" .. name, "w")
+        local f <close> = io.open(`$dir/$name`, "w")
         f:write(text)
     end
     write("page.hbs", "<h1>{{ title }}</h1>{{> footer }}")

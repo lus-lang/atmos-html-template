@@ -1,13 +1,13 @@
 --- Renders HTML from templates with the syntax of Handlebars.
 ---
---- `html_template.compile` turns a template into a function that renders a
---- context table. `{{name}}` inserts an escaped value, `{{{name}}}` inserts
---- it unescaped, and the block helpers `if`, `unless`, `each`, and `with`
---- choose and repeat parts of the template. An environment holds helpers
---- and partials, and may load templates from files.
+--- `html_template.compile` turns a template into a callable template that
+--- renders a context table. `{{name}}` inserts an escaped value,
+--- `{{{name}}}` an unescaped one. The block helpers `if`, `unless`, `each`,
+--- and `with` choose and repeat parts of the template. An environment holds
+--- helpers and partials and may load templates from files.
 ---
 --- @package html_template
---- @version 0.1.0
+--- @version 1.0.0
 --- @lus 2.0
 --- @license 0BSD
 --- @repository https://github.com/lus-lang/atmos-html-template
@@ -23,10 +23,11 @@ local function fail(line, message)
     error(setmetatable({ line = line, message = `html_template: line $line: $message` }, TemplateError), 0)
 end
 
---- Returns true if `value` is an error object that compiling or rendering
---- raised.
+--- Returns true if `value` is an error object that compiling or rendering a
+--- template raised.
 ---
---- The error object has a `message` and the `line` of the template.
+--- The error object has a `line`, the line of the template where the error
+--- is, and a `message` that starts with `html_template: line N:`.
 --- @param value any The value to test.
 --- @return boolean
 function M.iserror(value)
@@ -816,7 +817,7 @@ compile_nodes = function(env, tokens, i, closing)
                 end
                 local text = render_block(partial.nodes, new_frame(ctx, f))
                 if indent ~= "" then
-                    text = indent .. text:gsub("\n(.)", "\n" .. indent .. "%1")
+                    text = indent .. text:gsub("\n(.)", `\n$indent%1`)
                 end
                 out[#out + 1] = text
             end
@@ -868,14 +869,16 @@ end
 
 --- Compiles a template and returns a callable template.
 ---
---- Calling the result with a context table returns the rendered string.
---- `options.data` passes values that the template reads as `@name`. Values
---- are converted with `tostring`, except that `nil` renders as nothing and a
---- float with an integral value renders without a fraction. A tag that is
---- not closed, a block that is not closed or closes with another name, or an
---- `{{else}}` outside a block raises an error object whose message starts
---- with `html_template: line N:`. An unknown helper or partial raises the
---- same kind of error while rendering.
+--- Calling the result with a context table returns the rendered string. An
+--- optional second argument is an options table whose `data` field holds the
+--- values that the template reads as `@name`. Values are converted with
+--- `tostring`, except that `nil` renders as nothing and a float with an
+--- integral value renders without a fraction.
+---
+--- A tag that is not closed, a block that is not closed or closes with
+--- another name, or an `{{else}}` outside a block raises an error object
+--- whose message starts with `html_template: line N:`. An unknown helper or
+--- partial raises the same kind of error while the template renders.
 --- @param source string The template.
 --- @return table
 function Env:compile(source)
@@ -890,11 +893,12 @@ end
 
 --- Registers a helper.
 ---
---- A helper is called with the values of its arguments and an options table
---- with `hash`, the named arguments, and `data`, the `@` values. A block
---- helper also receives `fn(context, { data = ... })`, which renders the
---- block, and `inverse(context)`, which renders the `{{else}}` part. The
---- result of a helper is escaped unless it is a value of `html_template.safe`.
+--- A helper is called with the values of its arguments, followed by an
+--- options table. The `hash` field of that table holds the named arguments
+--- and its `data` field holds the `@` values. For a block helper, the table
+--- also holds `fn(context, { data = ... })`, which renders the block, and
+--- `inverse(context)`, which renders the `{{else}}` part. The result of a
+--- helper is escaped unless it is a value of `html_template.safe`.
 --- @param name string The name.
 --- @param fn function The helper.
 function Env:helper(name, fn)
@@ -923,7 +927,7 @@ end
 function Env:partial(name)
     local p = self.partials[name]
     if p == nil and self.root then
-        if text = read_file(self.root .. "/" .. name .. self.extension) then
+        if text = read_file(`$(self.root)/$name$(self.extension)`) then
             p = self:compile(text)
             self.partials[name] = p
         end
@@ -934,8 +938,10 @@ end
 --- Loads, compiles, and caches the template file `name` from the root
 --- directory, then renders it with `context`.
 ---
---- The file is `ROOT/NAME.hbs`, or the extension that the environment sets.
---- A missing file raises an error. Reading it requires `fs:read`.
+--- The file is `ROOT/NAME.hbs`, or `ROOT/NAME` followed by the extension that
+--- the environment sets. Reading it requires `fs:read`. A missing file, or
+--- an environment without a root, raises an error. Later calls with the same
+--- name reuse the compiled template.
 --- @param name string The template name.
 --- @param context any The context.
 --- @param options table? The options of a template call.
@@ -946,7 +952,7 @@ function Env:render(name, context, options)
         if self.root == nil then
             error(`html_template: the environment has no root to load '$name' from`, 2)
         end
-        local path = self.root .. "/" .. name .. self.extension
+        local path = `$(self.root)/$name$(self.extension)`
         local text = read_file(path)
         if text == nil then
             error(`html_template: cannot read '$path'`, 2)
@@ -959,12 +965,13 @@ end
 
 --- Returns a new environment.
 ---
---- `options.root` is a directory that `render` and partials load files
---- from, `options.extension` their extension, `".hbs"` by default.
---- `options.helpers` and `options.partials` are tables of helpers and of
---- partial sources to register. Every environment starts with the helpers
---- `lookup`, `eq`, `ne`, `lt`, `gt`, `and`, `or`, `not`, and `json`, in
---- addition to the block helpers `if`, `unless`, `each`, and `with`.
+--- `options.root` is the directory that `render` loads templates from. A
+--- partial that no call has registered is loaded from the same directory.
+--- `options.extension` is the extension of those files and defaults to
+--- `".hbs"`. `options.helpers` and `options.partials` are tables of helpers
+--- and of partial sources to register. Every environment starts with the
+--- block helpers `if`, `unless`, `each`, and `with`, along with the helpers
+--- `lookup`, `eq`, `ne`, `lt`, `gt`, `and`, `or`, `not`, and `json`.
 --- @param options table? The options.
 --- @return table
 function M.env(options)
@@ -985,16 +992,16 @@ function M.env(options)
     env.helpers.lt = function(a, b) return a < b end
     env.helpers.gt = function(a, b) return a > b end
     env.helpers["and"] = function(...)
-        local n = select("#", ...) - 1
-        for i = 1, n do
-            if not truthy((select(i, ...))) then return false end
+        local args = table.pack(...)
+        for i = 1, args.n - 1 do
+            if not truthy(args[i]) then return false end
         end
         return true
     end
     env.helpers["or"] = function(...)
-        local n = select("#", ...) - 1
-        for i = 1, n do
-            local v = select(i, ...)
+        local args = table.pack(...)
+        for i = 1, args.n - 1 do
+            local v = args[i]
             if truthy(v) then return v end
         end
         return false
@@ -1014,8 +1021,8 @@ local default = M.env()
 
 --- Compiles a template with the default environment.
 ---
---- It is `env:compile` of an environment that `html_template.helper` and
---- `html_template.register_partial` add to.
+--- The default environment is the one to which `html_template.helper` and
+--- `html_template.register_partial` add helpers and partials.
 --- @param source string The template.
 --- @return table
 function M.compile(source)

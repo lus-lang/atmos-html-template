@@ -2,7 +2,7 @@
 -- as template.lus does, and through html_template, then prints both times.
 local HERE = string.match(arg[0], "^(.*)[/\\][^/\\]*$") or "."
 pledge("load", "fs:read")
-package.path = HERE .. "/../?.lus;" .. package.path
+package.path = `$HERE/../?.lus;$(package.path)`
 local template = require("html_template")
 
 local N = tonumber(arg[1]) or 200000
