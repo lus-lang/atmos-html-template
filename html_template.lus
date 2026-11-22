@@ -357,8 +357,7 @@ local function compile_path(text, line)
                 for _ = 1, up do frame = frame.parent or frame end
                 local key = parts[1]
                 while frame do
-                    local data = frame.data
-                    if data then
+                    if data = frame.data then
                         v = data[key]
                         if v ~= nil then break end
                     end
@@ -462,8 +461,7 @@ compile_expr = function(env, body, line)
         local simple = not name:find("[%./@%[]") and name ~= "this"
         return function(f)
             if simple then
-                local helper = env.helpers[name]
-                if helper then
+                if helper = env.helpers[name] then
                     return helper({ hash = {}, data = f.data, name = name, frame = f })
                 end
             end
@@ -613,15 +611,13 @@ local function compile_block(env, token, body, inverse)
             local value = cond(f)
             local yes = truthy(value, include_zero)
             if negate then yes = not yes end
-            local nodes = yes and body or inverse
-            if nodes then
+            if nodes = yes and body or inverse then
                 for i = 1, #nodes do
                     nodes[i](out, f)
                 end
             end
         end
     end
-    local builtin = BUILTIN[name]
     if name == "each" and nargs == 1 then
         -- The built-in each renders into the buffer of its parent with one
         -- frame and one data table that each iteration updates, which
@@ -927,8 +923,7 @@ end
 function Env:partial(name)
     local p = self.partials[name]
     if p == nil and self.root then
-        local text = read_file(self.root .. "/" .. name .. self.extension)
-        if text then
+        if text = read_file(self.root .. "/" .. name .. self.extension) then
             p = self:compile(text)
             self.partials[name] = p
         end
