@@ -6,6 +6,19 @@
 --- and `with` choose and repeat parts of the template. An environment holds
 --- helpers and partials and may load templates from files.
 ---
+--- The following example renders the heading and the dishes of a menu,
+--- escaping the ampersand in the title.
+---
+--- ```lus nocheck
+--- local template = require("https://atmosp.here/2.0/html_template.lus")
+---
+--- local page = template.compile(
+---     "<h1>{{ title }}</h1><ul>{{#each items}}<li>{{ name }}</li>{{/each}}</ul>"
+--- )
+--- print(page({ title = "Fish & Chips", items = { { name = "Cod" }, { name = "Haddock" } } }))
+--- --> <h1>Fish &amp; Chips</h1><ul><li>Cod</li><li>Haddock</li></ul>
+--- ```
+---
 --- @package html_template
 --- @version 1.0.0
 --- @lus 2.0
@@ -17,10 +30,19 @@ local M = {}
 
 local TemplateError = {}
 TemplateError.__index = TemplateError
-TemplateError.__tostring = function(e) return e.message end
+
+TemplateError.__tostring = function(e)
+    return e.message
+end
 
 local function fail(line, message)
-    error(setmetatable({ line = line, message = `html_template: line $line: $message` }, TemplateError), 0)
+    error(
+        setmetatable(
+            { line = line, message = `html_template: line $line: $message` },
+            TemplateError
+        ),
+        0
+    )
 end
 
 --- Returns true if `value` is an error object that compiling or rendering a
@@ -36,11 +58,22 @@ end
 
 -- Escaping --------------------------------------------------------------------------
 
-local ESCAPE = { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#x27;", ["`"] = "&#x60;", ["="] = "&#x3D;" }
+local ESCAPE = {
+    ["&"] = "&amp;",
+    ["<"] = "&lt;",
+    [">"] = "&gt;",
+    ['"'] = "&quot;",
+    ["'"] = "&#x27;",
+    ["`"] = "&#x60;",
+    ["="] = "&#x3D;",
+}
 
 local Safe = {}
 Safe.__index = Safe
-Safe.__tostring = function(s) return s.text end
+
+Safe.__tostring = function(s)
+    return s.text
+end
 
 --- Marks `text` as HTML that `{{ }}` inserts without escaping.
 ---
@@ -55,17 +88,21 @@ local function to_text(v)
     if v == nil then
         return ""
     end
+
     local t = type(v)
+
     if t == "string" then
         return v
     elseif t == "number" then
         if math.type(v) == "float" and v == math.floor(v) and v > -1e15 and v < 1e15 then
             return string.format("%d", v)
         end
+
         return tostring(v)
     elseif t == "boolean" then
         return v and "true" or "false"
     end
+
     return tostring(v)
 end
 
@@ -76,10 +113,13 @@ function M.escape(text)
     if getmetatable(text) == Safe then
         return text.text
     end
+
     local s = to_text(text)
+
     if s:find("[&<>\"'`=]") then
         return (s:gsub("[&<>\"'`=]", ESCAPE))
     end
+
     return s
 end
 
@@ -90,16 +130,23 @@ local function truthy(v, include_zero)
     if v == nil or v == false or v == "" then
         return false
     end
+
     if v == 0 and not include_zero then
         return false
     end
+
     if type(v) == "table" and getmetatable(v) == nil and next(v) == nil then
         return false
     end
+
     return true
 end
 
 -- Tokens ------------------------------------------------------------------------------
+
+-- The kinds of token. `inverse` is an `{{else}}` tag, which starts the part
+-- of a block that renders when its condition fails.
+local Token = enum text, comment, raw, expr, open, close, inverse, partial end
 
 -- Splits a template into text and tag tokens. Each tag token has `kind`,
 -- `body`, and `line`.
@@ -107,142 +154,188 @@ local function tokenize(src)
     local tokens = {}
     local pos, line = 1, 1
     local n = #src
+
     while pos <= n do
         local open = src:find("{{", pos, true)
+
         if open == nil then
-            tokens[#tokens + 1] = { kind = "text", text = src:sub(pos) }
+            tokens[#tokens + 1] = { kind = Token.text, text = src:sub(pos) }
             break
         end
+
         if open > 1 and src:sub(open - 1, open - 1) == "\\" then
             -- An escaped tag is literal text.
-            tokens[#tokens + 1] = { kind = "text", text = src:sub(pos, open - 2) .. "{{" }
-            for _ in src:sub(pos, open):gmatch("\n") do line = line + 1 end
+            tokens[#tokens + 1] = { kind = Token.text, text = src:sub(pos, open - 2) .. "{{" }
+
+            for _ in src:sub(pos, open):gmatch("\n") do
+                line = line + 1
+            end
+
             pos = open + 2
             continue
         end
+
         if open > pos then
             local text = src:sub(pos, open - 1)
-            tokens[#tokens + 1] = { kind = "text", text = text }
-            for _ in text:gmatch("\n") do line = line + 1 end
+            tokens[#tokens + 1] = { kind = Token.text, text = text }
+
+            for _ in text:gmatch("\n") do
+                line = line + 1
+            end
         end
+
         do
             local tag_line = line
             local kind, close_pat
             local start = open + 2
+
             if src:sub(open, open + 4) == "{{!--" then
-                kind, close_pat, start = "comment", "--}}", open + 5
+                kind, close_pat, start = Token.comment, "--}}", open + 5
             elseif src:sub(open, open + 2) == "{{{" then
-                kind, close_pat, start = "raw", "}}}", open + 3
+                kind, close_pat, start = Token.raw, "}}}", open + 3
             else
-                kind, close_pat = "tag", "}}"
+                kind, close_pat = Token.expr, "}}"
             end
+
             local strip_left = false
+
             if src:sub(start, start) == "~" then
                 strip_left = true
                 start = start + 1
             end
+
             local close = src:find(close_pat, start, true)
+
             if close == nil then
                 fail(tag_line, "unclosed tag")
             end
+
             local body = src:sub(start, close - 1)
             local strip_right = false
+
             if body:sub(-1) == "~" then
                 strip_right = true
                 body = body:sub(1, -2)
             end
-            for _ in src:sub(open, close):gmatch("\n") do line = line + 1 end
+
+            for _ in src:sub(open, close):gmatch("\n") do
+                line = line + 1
+            end
+
             pos = close + #close_pat
             local token = { line = tag_line, strip_left = strip_left, strip_right = strip_right }
-            if kind == "comment" then
-                token.kind = "comment"
-            elseif kind == "raw" then
-                token.kind = "raw"
+
+            if kind == Token.comment then
+                token.kind = Token.comment
+            elseif kind == Token.raw then
+                token.kind = Token.raw
                 token.body = body
             else
                 local c = body:match("^%s*(.)")
                 local rest = body:match("^%s*.%s*(.-)%s*$")
+
                 if c == "!" then
-                    token.kind = "comment"
+                    token.kind = Token.comment
                 elseif c == "#" then
-                    token.kind = "open"
+                    token.kind = Token.open
                     token.body = rest
                 elseif c == "^" then
                     if rest == "" then
-                        token.kind = "else"
+                        token.kind = Token.inverse
                     else
-                        token.kind = "open"
+                        token.kind = Token.open
                         token.inverted = true
                         token.body = rest
                     end
                 elseif c == "/" then
-                    token.kind = "close"
+                    token.kind = Token.close
                     token.body = rest
                 elseif c == ">" then
-                    token.kind = "partial"
+                    token.kind = Token.partial
                     token.body = rest
                 elseif c == "&" then
-                    token.kind = "raw"
+                    token.kind = Token.raw
                     token.body = rest
                 else
                     local trimmed = body:match("^%s*(.-)%s*$")
+
                     if trimmed == "else" then
-                        token.kind = "else"
+                        token.kind = Token.inverse
                     elseif trimmed:match("^else%s") then
-                        token.kind = "else"
+                        token.kind = Token.inverse
                         token.chain = trimmed:match("^else%s+(.*)$")
                     else
-                        token.kind = "expr"
+                        token.kind = Token.expr
                         token.body = trimmed
                     end
                 end
             end
+
             tokens[#tokens + 1] = token
         end
     end
+
     return tokens
 end
 
 -- Applies whitespace control and removes the whitespace of standalone tags,
 -- which are block, else, close, comment, and partial tags alone on a line.
-local STANDALONE = { open = true, close = true, ["else"] = true, comment = true, partial = true }
+local STANDALONE = {
+    [Token.open] = true,
+    [Token.close] = true,
+    [Token.inverse] = true,
+    [Token.comment] = true,
+    [Token.partial] = true,
+}
 
 local function clean_whitespace(tokens)
     for i, t in ipairs(tokens) do
-        if t.kind ~= "text" then
-            if t.strip_left and tokens[i - 1] and tokens[i - 1].kind == "text" then
+        if t.kind ~= Token.text then
+            if t.strip_left and tokens[i - 1]?.kind == Token.text then
                 tokens[i - 1].text = tokens[i - 1].text:gsub("%s+$", "")
             end
-            if t.strip_right and tokens[i + 1] and tokens[i + 1].kind == "text" then
+
+            if t.strip_right and tokens[i + 1]?.kind == Token.text then
                 tokens[i + 1].text = tokens[i + 1].text:gsub("^%s+", "")
             end
         end
     end
+
     -- The decisions read the text as it was, so a run of standalone tags on
     -- consecutive lines is removed whole.
     local count = #tokens
     local standalone = {}
+
     for i, t in ipairs(tokens) do
         if STANDALONE[t.kind] then
             local prev, nxt = tokens[i - 1], tokens[i + 1]
             local starts = prev == nil
-                or (prev.kind == "text" and (prev.text:match("\n[ \t]*$") or (i == 2 and prev.text:match("^[ \t]*$"))))
+                or (prev.kind == Token.text
+                    and (prev.text:match("\n[ \t]*$") or (i == 2 and prev.text:match("^[ \t]*$"))))
             local ends = nxt == nil
-                or (nxt.kind == "text" and (nxt.text:match("^[ \t]*\r?\n") or (i + 1 == count and nxt.text:match("^[ \t]*$"))))
+                or (nxt.kind == Token.text
+                    and (nxt.text:match("^[ \t]*\r?\n")
+                        or (i + 1 == count and nxt.text:match("^[ \t]*$"))))
+
             if starts and ends then
                 standalone[i] = true
             end
         end
     end
+
     for i in pairs(standalone) do
         local prev, nxt = tokens[i - 1], tokens[i + 1]
+
         if prev then
             local lead = prev.text:match("[ \t]*$")
-            if tokens[i].kind == "partial" then
+
+            if tokens[i].kind == Token.partial then
                 tokens[i].indent = lead
             end
+
             prev.text = prev.text:sub(1, #prev.text - #lead)
         end
+
         if nxt then
             local trail = nxt.text:match("^[ \t]*\r?\n") or nxt.text:match("^[ \t]*")
             nxt.text = nxt.text:sub(#trail + 1)
@@ -257,62 +350,106 @@ end
 local function words(body, line)
     local out = {}
     local i, n = 1, #body
+
     while i <= n do
         local c = body:sub(i, i)
+
         if c:match("%s") then
             i = i + 1
         elseif c == '"' or c == "'" then
             local j = body:find(c, i + 1, true)
+
             if j == nil then
                 fail(line, "unterminated string")
             end
+
             out[#out + 1] = body:sub(i, j)
             i = j + 1
         elseif c == "(" then
             local depth, j = 0, i
+
             while j <= n do
                 local d = body:sub(j, j)
-                if d == "(" then depth = depth + 1 elseif d == ")" then depth = depth - 1 end
-                if depth == 0 then break end
+
+                if d == "(" then
+                    depth = depth + 1
+                elseif d == ")" then
+                    depth = depth - 1
+                end
+
+                if depth == 0 then
+                    break
+                end
+
                 j = j + 1
             end
+
             if depth ~= 0 then
                 fail(line, "unclosed subexpression")
             end
+
             out[#out + 1] = body:sub(i, j)
             i = j + 1
         else
             local j = i
+
             while j <= n do
                 local d = body:sub(j, j)
-                if d:match("%s") then break end
+
+                if d:match("%s") then
+                    break
+                end
+
                 if d == "[" then
                     local k = body:find("]", j + 1, true)
-                    if k == nil then fail(line, "unclosed '['") end
+
+                    if k == nil then
+                        fail(line, "unclosed '['")
+                    end
+
                     j = k
                 elseif d == "=" then
                     local q = body:sub(j + 1, j + 1)
+
                     if q == '"' or q == "'" then
                         local k = body:find(q, j + 2, true)
-                        if k == nil then fail(line, "unterminated string") end
+
+                        if k == nil then
+                            fail(line, "unterminated string")
+                        end
+
                         j = k
                     elseif q == "(" then
                         local depth, k = 0, j + 1
+
                         while k <= n do
                             local e = body:sub(k, k)
-                            if e == "(" then depth = depth + 1 elseif e == ")" then depth = depth - 1 end
-                            if depth == 0 then break end
+
+                            if e == "(" then
+                                depth = depth + 1
+                            elseif e == ")" then
+                                depth = depth - 1
+                            end
+
+                            if depth == 0 then
+                                break
+                            end
+
                             k = k + 1
                         end
+
                         j = k
                     end
                 end
+
                 j = j + 1
             end
+
             out[#out + 1] = body:sub(i, j - 1)
             i = j
         end
     end
+
     return out
 end
 
@@ -323,89 +460,145 @@ local compile_expr
 -- Compiles a path into a function of a frame.
 local function compile_path(text, line)
     if text == "this" or text == "." then
-        return function(f) return f.ctx end
+        return function(f)
+            return f.ctx
+        end
     end
+
     local up = 0
+
     while text:sub(1, 3) == "../" do
         up = up + 1
         text = text:sub(4)
     end
+
     if text:sub(1, 5) == "this." or text:sub(1, 2) == "./" then
         text = text:gsub("^this%.", ""):gsub("^%./", "")
     end
+
     local is_data = text:sub(1, 1) == "@"
+
     if is_data then
         text = text:sub(2)
     end
+
     local parts = {}
+
     for part in text:gmatch("[^%.]+") do
-        local bracket = part:match("^%[(.*)%]$")
-        local key = bracket or part
+        local key = part:match("^%[(.*)%]$") or part
         local index = math.tointeger(tonumber(key))
         parts[#parts + 1] = index or key
     end
+
     if #parts == 0 then
         fail(line, `invalid path '$text'`)
     end
+
     local count = #parts
+
     if is_data then
         return function(f)
             local v
+
             if parts[1] == "root" then
                 v = f.root
             else
                 local frame = f
-                for _ = 1, up do frame = frame.parent or frame end
+
+                for _ = 1, up do
+                    frame = frame.parent or frame
+                end
+
                 local key = parts[1]
+
                 while frame do
                     if data = frame.data then
                         v = data[key]
-                        if v ~= nil then break end
+
+                        if v ~= nil then
+                            break
+                        end
                     end
+
                     frame = frame.parent
                 end
             end
+
             for i = 2, count do
-                if type(v) ~= "table" and type(v) ~= "userdata" then return nil end
+                if type(v) ~= "table" and type(v) ~= "userdata" then
+                    return nil
+                end
+
                 v = v[parts[i]]
             end
+
             return v
         end
     end
+
     local first = parts[1]
+
     if up == 0 and count == 1 then
         return function(f)
             local ctx = f.ctx
             local t = type(ctx)
+
             if t == "table" or t == "userdata" then
                 return ctx[first]
             end
+
             return nil
         end
     end
+
     return function(f)
         local frame = f
-        for _ = 1, up do frame = frame.parent or frame end
+
+        for _ = 1, up do
+            frame = frame.parent or frame
+        end
+
         local v = frame.ctx
+
         for i = 1, count do
             local t = type(v)
-            if t ~= "table" and t ~= "userdata" then return nil end
+
+            if t ~= "table" and t ~= "userdata" then
+                return nil
+            end
+
             v = v[parts[i]]
         end
+
         return v
     end
 end
 
 local function literal(word)
     local q = word:sub(1, 1)
+
     if q == '"' or q == "'" then
         return true, word:sub(2, -2)
     end
-    if word == "true" then return true, true end
-    if word == "false" then return true, false end
-    if word == "null" or word == "undefined" or word == "nil" then return true, nil end
+
+    if word == "true" then
+        return true, true
+    end
+
+    if word == "false" then
+        return true, false
+    end
+
+    if word == "null" or word == "undefined" or word == "nil" then
+        return true, nil
+    end
+
     local n = tonumber(word)
-    if n and word:match("^%-?%d") then return true, n end
+
+    if n and word:match("^%-?%d") then
+        return true, n
+    end
+
     return false
 end
 
@@ -413,25 +606,37 @@ end
 local function compile_arg(env, word, line)
     if word:sub(1, 1) == "(" then
         local inner = compile_expr(env, word:sub(2, -2), line)
-        return function(f) return inner(f) end
+
+        return function(f)
+            return inner(f)
+        end
     end
+
     local is_lit, value = literal(word)
+
     if is_lit then
-        return function() return value end
+        return function()
+            return value
+        end
     end
+
     return compile_path(word, line)
 end
 
 -- Compiles "name arg ... key=value" into the parts of a call.
 local function parse_call(env, body, line)
     local ws = words(body, line)
+
     if #ws == 0 then
         fail(line, "empty tag")
     end
+
     local name = ws[1]
     local args, hash = {}, nil
+
     for i = 2, #ws do
         local k, v = ws[i]:match("^([%w_%-]+)=(.+)$")
+
         if k then
             hash = hash or {}
             hash[#hash + 1] = { k, compile_arg(env, v, line) }
@@ -439,16 +644,19 @@ local function parse_call(env, body, line)
             args[#args + 1] = compile_arg(env, ws[i], line)
         end
     end
+
     return name, args, hash
 end
 
 local function eval_hash(hash, f)
     local out = {}
+
     if hash then
         for _, pair in ipairs(hash) do
             out[pair[1]] = pair[2](f)
         end
     end
+
     return out
 end
 
@@ -457,31 +665,43 @@ end
 compile_expr = function(env, body, line)
     local name, args, hash = parse_call(env, body, line)
     local nargs = #args
+
     if nargs == 0 and hash == nil and not literal(name) then
         local path = name:sub(1, 1) ~= "(" and compile_path(name, line) or nil
         local simple = not name:find("[%./@%[]") and name ~= "this"
+
         return function(f)
             if simple then
                 if helper = env.helpers[name] then
                     return helper({ hash = {}, data = f.data, name = name, frame = f })
                 end
             end
+
             return path(f)
         end
     end
+
     local is_lit, lit_value = literal(name)
+
     if is_lit then
-        return function() return lit_value end
+        return function()
+            return lit_value
+        end
     end
+
     return function(f)
         local helper = env.helpers[name]
+
         if helper == nil then
             fail(line, `unknown helper '$name'`)
         end
+
         local values = {}
+
         for i = 1, nargs do
             values[i] = args[i](f)
         end
+
         values[nargs + 1] = { hash = eval_hash(hash, f), data = f.data, name = name, frame = f }
         return helper(table.unpack(values, 1, nargs + 1))
     end
@@ -492,43 +712,61 @@ end
 local compile_nodes
 
 local function new_frame(ctx, parent, data)
-    return { ctx = ctx, parent = parent, data = data or (parent and parent.data), root = parent and parent.root or ctx }
+    return {
+        ctx = ctx,
+        parent = parent,
+        data = data or parent?.data,
+        root = parent?.root or ctx,
+    }
 end
 
 local function render_block(nodes, frame)
     local out = {}
+
     for i = 1, #nodes do
         nodes[i](out, frame)
     end
+
     return table.concat(out)
 end
 
 -- Builds the options table that a block helper receives.
 local function block_options(name, body, inverse, frame, hash)
     local options = { name = name, hash = hash, data = frame.data, frame = frame }
+
     options.fn = function(ctx, extra)
-        return render_block(body, new_frame(ctx == nil and frame.ctx or ctx, frame, extra and extra.data or {}))
+        return render_block(
+            body,
+            new_frame(ctx == nil and frame.ctx or ctx, frame, extra?.data or {})
+        )
     end
+
     options.inverse = function(ctx)
         if inverse == nil then
             return ""
         end
+
         return render_block(inverse, new_frame(ctx == nil and frame.ctx or ctx, frame))
     end
+
     return options
 end
 
 local function sorted_keys(t)
     local keys = {}
+
     for k in pairs(t) do
         keys[#keys + 1] = k
     end
+
     table.sort(keys, function(a, b)
         if type(a) == type(b) and (type(a) == "number" or type(a) == "string") then
             return a < b
         end
+
         return tostring(a) < tostring(b)
     end)
+
     return keys
 end
 
@@ -538,9 +776,11 @@ function BUILTIN.each(context, options)
     if type(context) ~= "table" then
         return options.inverse()
     end
+
     local out = {}
     local n = #context
     local is_list = n > 0 or next(context) == nil
+
     if is_list then
         for k in pairs(context) do
             if math.type(k) ~= "integer" or k < 1 or k > n then
@@ -549,29 +789,37 @@ function BUILTIN.each(context, options)
             end
         end
     end
-    local alias = options.hash and options.hash.as
+
+    local alias = options.hash?.as
+
     if is_list then
         if n == 0 then
             return options.inverse()
         end
+
         for i = 1, n do
             local data = { index = i, key = i, first = i == 1, last = i == n }
             local item = context[i]
+
             if alias then
                 data[alias] = item
             end
+
             out[i] = options.fn(item, { data = data })
         end
     else
         local keys = sorted_keys(context)
+
         if #keys == 0 then
             return options.inverse()
         end
+
         for i, k in ipairs(keys) do
             local data = { index = i, key = k, first = i == 1, last = i == #keys }
             out[i] = options.fn(context[k], { data = data })
         end
     end
+
     return table.concat(out)
 end
 
@@ -579,6 +827,7 @@ function BUILTIN.with(context, options)
     if not truthy(context) then
         return options.inverse()
     end
+
     return options.fn(context)
 end
 
@@ -589,18 +838,23 @@ local function compile_block(env, token, body, inverse)
     local name, args, hash = parse_call(env, token.body, token.line)
     local line = token.line
     local nargs = #args
+
     if name == "if" or name == "unless" or token.inverted then
         local cond
+
         if token.inverted then
             cond = compile_expr(env, token.body, line)
         else
             if nargs ~= 1 then
                 fail(line, `'$name' takes one argument`)
             end
+
             cond = args[1]
         end
+
         local negate = name == "unless" or token.inverted
         local include_zero = false
+
         if hash then
             for _, pair in ipairs(hash) do
                 if pair[1] == "includeZero" or pair[1] == "include_zero" then
@@ -608,10 +862,15 @@ local function compile_block(env, token, body, inverse)
                 end
             end
         end
+
         return function(out, f)
             local value = cond(f)
             local yes = truthy(value, include_zero)
-            if negate then yes = not yes end
+
+            if negate then
+                yes = not yes
+            end
+
             if nodes = yes and body or inverse then
                 for i = 1, #nodes do
                     nodes[i](out, f)
@@ -619,35 +878,50 @@ local function compile_block(env, token, body, inverse)
             end
         end
     end
+
     if name == "each" and nargs == 1 then
         -- The built-in each renders into the buffer of its parent with one
         -- frame and one data table that each iteration updates, which
         -- costs no table per item. A helper registered as "each" replaces it.
         local list_fn = args[1]
         local alias
+
         if hash then
             for _, pair in ipairs(hash) do
-                if pair[1] == "as" then alias = pair[2]({}) end
+                if pair[1] == "as" then
+                    alias = pair[2]({})
+                end
             end
         end
+
         local generic
+
         return function(out, f)
             if env.helpers.each then
-                generic = generic or compile_block_generic(env, name, args, hash, body, inverse, line)
+                generic = generic
+                    or compile_block_generic(env, name, args, hash, body, inverse, line)
                 return generic(out, f)
             end
+
             local context = list_fn(f)
+
             if type(context) ~= "table" then
                 if inverse then
-                    for i = 1, #inverse do inverse[i](out, f) end
+                    for i = 1, #inverse do
+                        inverse[i](out, f)
+                    end
                 end
+
                 return
             end
+
             local n = #context
             local keys
+
             if n == 0 or next(context, n) ~= nil or (n > 0 and context[0] ~= nil) then
                 -- Not a plain list: iterate every key in sorted order.
                 local is_list = n > 0
+
                 if is_list then
                     for k in pairs(context) do
                         if math.type(k) ~= "integer" or k < 1 or k > n then
@@ -656,48 +930,68 @@ local function compile_block(env, token, body, inverse)
                         end
                     end
                 end
+
                 if not is_list then
                     keys = sorted_keys(context)
                     n = #keys
                 end
             end
+
             if n == 0 then
                 if inverse then
-                    for i = 1, #inverse do inverse[i](out, f) end
+                    for i = 1, #inverse do
+                        inverse[i](out, f)
+                    end
                 end
+
                 return
             end
+
             local data = {}
             local frame = { parent = f, data = data, root = f.root }
             local count = #body
+
             for i = 1, n do
                 local key = keys and keys[i] or i
                 local item = context[key]
                 data.index, data.key, data.first, data.last = i, key, i == 1, i == n
-                if alias then data[alias] = item end
+
+                if alias then
+                    data[alias] = item
+                end
+
                 frame.ctx = item
+
                 for j = 1, count do
                     body[j](out, frame)
                 end
             end
         end
     end
+
     if name == "with" and nargs == 1 then
         local value_fn = args[1]
+
         return function(out, f)
             if env.helpers.with then
                 return compile_block_generic(env, name, args, hash, body, inverse, line)(out, f)
             end
+
             local value = value_fn(f)
             local nodes, frame = inverse, f
+
             if truthy(value) then
                 nodes, frame = body, new_frame(value, f)
             end
+
             if nodes then
-                for i = 1, #nodes do nodes[i](out, frame) end
+                for i = 1, #nodes do
+                    nodes[i](out, frame)
+                end
             end
         end
     end
+
     return compile_block_generic(env, name, args, hash, body, inverse, line)
 end
 
@@ -706,25 +1000,32 @@ compile_block_generic = function(env, name, args, hash, body, inverse, line)
     local nargs = #args
     local builtin = BUILTIN[name]
     local section_path = nargs == 0 and compile_path(name, line) or nil
+
     return function(out, f)
         local helper = env.helpers[name] or builtin
         local values = {}
         local count = nargs
+
         for i = 1, count do
             values[i] = args[i](f)
         end
+
         if helper == nil then
             -- A block on a plain path acts as Mustache sections do.
             if count > 0 then
                 fail(line, `unknown helper '$name'`)
             end
+
             local value = section_path(f)
-            helper = type(value) == "table" and (#value > 0 or next(value) == nil) and BUILTIN.each or BUILTIN.with
+            helper = type(value) == "table" and (#value > 0 or next(value) == nil) and BUILTIN.each
+                or BUILTIN.with
             values[1] = value
             count = 1
         end
+
         values[count + 1] = block_options(name, body, inverse, f, eval_hash(hash, f))
         local result = helper(table.unpack(values, 1, count + 1))
+
         if result ~= nil then
             out[#out + 1] = getmetatable(result) == Safe and result.text or to_text(result)
         end
@@ -737,17 +1038,22 @@ end
 local function compile_else(env, tokens, i, stop)
     if stop.chain == nil then
         local inverse, j, after = compile_nodes(env, tokens, i + 1, true)
-        if after and after.kind == "else" then
+
+        if after?.kind == Token.inverse then
             fail(after.line, "a block has more than one '{{else}}'")
         end
+
         return inverse, j, after
     end
-    local chained = { kind = "open", body = stop.chain, line = stop.line }
+
+    local chained = { kind = Token.open, body = stop.chain, line = stop.line }
     local body, j, after = compile_nodes(env, tokens, i + 1, true)
     local inverse
-    if after and after.kind == "else" then
+
+    if after?.kind == Token.inverse then
         inverse, j, after = compile_else(env, tokens, j, after)
     end
+
     return { compile_block(env, chained, body, inverse) }, j, after
 end
 
@@ -755,20 +1061,27 @@ end
 -- the index after the end, and the token that ended the run.
 compile_nodes = function(env, tokens, i, closing)
     local nodes = {}
+
     while i <= #tokens do
         local t = tokens[i]
         local kind = t.kind
-        if kind == "text" then
+
+        if kind == Token.text then
             local text = t.text
+
             if text ~= "" then
-                nodes[#nodes + 1] = function(out) out[#out + 1] = text end
+                nodes[#nodes + 1] = function(out)
+                    out[#out + 1] = text
+                end
             end
+
             i = i + 1
-        elseif kind == "comment" then
+        elseif kind == Token.comment then
             i = i + 1
-        elseif kind == "expr" or kind == "raw" then
+        elseif kind == Token.expr or kind == Token.raw then
             local expr = compile_expr(env, t.body, t.line)
-            if kind == "raw" then
+
+            if kind == Token.raw then
                 nodes[#nodes + 1] = function(out, f)
                     local v = expr(f)
                     out[#out + 1] = getmetatable(v) == Safe and v.text or to_text(v)
@@ -778,19 +1091,24 @@ compile_nodes = function(env, tokens, i, closing)
                     out[#out + 1] = escape(expr(f))
                 end
             end
+
             i = i + 1
-        elseif kind == "partial" then
+        elseif kind == Token.partial then
             local ws = words(t.body, t.line)
             local name = ws[1]
             local dynamic
+
             if name:sub(1, 1) == "(" then
                 dynamic = compile_expr(env, name:sub(2, -2), t.line)
             elseif name:sub(1, 1) == '"' or name:sub(1, 1) == "'" then
                 name = name:sub(2, -2)
             end
+
             local ctx_fn, hash = nil, nil
+
             for j = 2, #ws do
                 local k, v = ws[j]:match("^([%w_%-]+)=(.+)$")
+
                 if k then
                     hash = hash or {}
                     hash[#hash + 1] = { k, compile_arg(env, v, t.line) }
@@ -798,54 +1116,81 @@ compile_nodes = function(env, tokens, i, closing)
                     ctx_fn = compile_arg(env, ws[j], t.line)
                 end
             end
+
             local indent = t.indent or ""
             local line = t.line
+
             nodes[#nodes + 1] = function(out, f)
                 local pname = dynamic and dynamic(f) or name
                 local partial = env:partial(pname)
+
                 if partial == nil then
                     fail(line, `unknown partial '$pname'`)
                 end
+
                 local ctx = ctx_fn and ctx_fn(f) or f.ctx
+
                 if hash then
                     local merged = {}
+
                     if type(ctx) == "table" then
-                        for k, v in pairs(ctx) do merged[k] = v end
+                        for k, v in pairs(ctx) do
+                            merged[k] = v
+                        end
                     end
-                    for k, v in pairs(eval_hash(hash, f)) do merged[k] = v end
+
+                    for k, v in pairs(eval_hash(hash, f)) do
+                        merged[k] = v
+                    end
+
                     ctx = merged
                 end
+
                 local text = render_block(partial.nodes, new_frame(ctx, f))
+
                 if indent ~= "" then
                     text = indent .. text:gsub("\n(.)", `\n$indent%1`)
                 end
+
                 out[#out + 1] = text
             end
+
             i = i + 1
-        elseif kind == "open" then
+        elseif kind == Token.open then
             local body, inverse, stop
             body, i, stop = compile_nodes(env, tokens, i + 1, true)
-            if stop and stop.kind == "else" then
+
+            if stop?.kind == Token.inverse then
                 inverse, i, stop = compile_else(env, tokens, i, stop)
             end
+
             local open_name = t.body:match("^(%S+)")
-            if stop == nil or stop.kind ~= "close" then
+
+            if stop?.kind ~= Token.close then
                 fail(t.line, `unclosed block '$open_name'`)
             end
+
             if stop.body ~= open_name then
                 fail(stop.line, `'{{/$(stop.body)}}' closes the block '$open_name'`)
             end
+
             nodes[#nodes + 1] = compile_block(env, t, body, inverse)
             i = i + 1
-        elseif kind == "else" or kind == "close" then
+        elseif kind == Token.inverse or kind == Token.close then
             if not closing then
-                fail(t.line, kind == "else" and "'{{else}}' outside a block" or `'{{/$(t.body)}}' closes no block`)
+                fail(
+                    t.line,
+                    kind == Token.inverse and "'{{else}}' outside a block"
+                        or `'{{/$(t.body)}}' closes no block`
+                )
             end
+
             return nodes, i, t
         else
             i = i + 1
         end
     end
+
     return nodes, i, nil
 end
 
@@ -856,14 +1201,17 @@ Env.__index = Env
 
 local Template = {}
 Template.__index = Template
+
 Template.__call = function(tpl, context, options)
-    local data = options and options.data or {}
+    local data = options?.data or {}
     local frame = { ctx = context, data = data, root = context }
     local out = {}
     local nodes = tpl.nodes
+
     for i = 1, #nodes do
         nodes[i](out, frame)
     end
+
     return table.concat(out)
 end
 
@@ -885,9 +1233,11 @@ function Env:compile(source)
     local tokens = tokenize(source)
     clean_whitespace(tokens)
     local nodes, _, stop = compile_nodes(self, tokens, 1, false)
+
     if stop then
         fail(stop.line, "unexpected closing tag")
     end
+
     return setmetatable({ nodes = nodes, env = self }, Template)
 end
 
@@ -914,9 +1264,11 @@ end
 
 local function read_file(path)
     local file = io.open(path, "r")
+
     if file == nil then
         return nil
     end
+
     local text = file:read("a")
     file:close()
     return text
@@ -926,12 +1278,14 @@ end
 -- environment has one.
 function Env:partial(name)
     local p = self.partials[name]
+
     if p == nil and self.root then
         if text = read_file(`$(self.root)/$name$(self.extension)`) then
             p = self:compile(text)
             self.partials[name] = p
         end
     end
+
     return p
 end
 
@@ -948,18 +1302,23 @@ end
 --- @return string
 function Env:render(name, context, options)
     local tpl = self.templates[name]
+
     if tpl == nil then
         if self.root == nil then
             error(`html_template: the environment has no root to load '$name' from`, 2)
         end
+
         local path = `$(self.root)/$name$(self.extension)`
         local text = read_file(path)
+
         if text == nil then
             error(`html_template: cannot read '$path'`, 2)
         end
+
         tpl = self:compile(text)
         self.templates[name] = tpl
     end
+
     return tpl(context, options)
 end
 
@@ -983,37 +1342,73 @@ function M.env(options)
         root = options.root,
         extension = options.extension or ".hbs",
     }, Env)
+
     env.helpers.lookup = function(obj, key)
-        if type(obj) ~= "table" then return nil end
+        if type(obj) ~= "table" then
+            return nil
+        end
+
         return obj[key]
     end
-    env.helpers.eq = function(a, b) return a == b end
-    env.helpers.ne = function(a, b) return a ~= b end
-    env.helpers.lt = function(a, b) return a < b end
-    env.helpers.gt = function(a, b) return a > b end
+
+    env.helpers.eq = function(a, b)
+        return a == b
+    end
+
+    env.helpers.ne = function(a, b)
+        return a ~= b
+    end
+
+    env.helpers.lt = function(a, b)
+        return a < b
+    end
+
+    env.helpers.gt = function(a, b)
+        return a > b
+    end
+
     env.helpers["and"] = function(...)
         local args = table.pack(...)
+
         for i = 1, args.n - 1 do
-            if not truthy(args[i]) then return false end
+            if not truthy(args[i]) then
+                return false
+            end
         end
+
         return true
     end
+
     env.helpers["or"] = function(...)
         local args = table.pack(...)
+
         for i = 1, args.n - 1 do
             local v = args[i]
-            if truthy(v) then return v end
+
+            if truthy(v) then
+                return v
+            end
         end
+
         return false
     end
-    env.helpers["not"] = function(v) return not truthy(v) end
-    env.helpers.json = function(v) return tojson(v) end
+
+    env.helpers["not"] = function(v)
+        return not truthy(v)
+    end
+
+    env.helpers.json = function(v)
+        return tojson(v)
+    end
+
     for name, fn in pairs(options.helpers or {}) do
         env.helpers[name] = fn
     end
+
     for name, source in pairs(options.partials or {}) do
         env:register_partial(name, source)
     end
+
     return env
 end
 

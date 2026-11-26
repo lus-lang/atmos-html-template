@@ -16,25 +16,35 @@ local function err_of(fn, ...)
 end
 
 local function escaping_test()
-    assert(render("<p>{{ name }}</p>", { name = "<b>Tom & \"Jerry\" 'x' `y` =z</b>" })
-        == "<p>&lt;b&gt;Tom &amp; &quot;Jerry&quot; &#x27;x&#x27; &#x60;y&#x60; &#x3D;z&lt;/b&gt;</p>")
+    assert(
+        render("<p>{{ name }}</p>", { name = "<b>Tom & \"Jerry\" 'x' `y` =z</b>" })
+            == "<p>&lt;b&gt;Tom &amp; &quot;Jerry&quot; &#x27;x&#x27; &#x60;y&#x60; &#x3D;z&lt;/b&gt;</p>"
+    )
     assert(render("{{{ html }}}|{{& html }}", { html = "<i>x</i>" }) == "<i>x</i>|<i>x</i>")
-    assert(render("{{ missing }}|{{ n }}|{{ f }}|{{ b }}", { n = 3, f = 2.0, b = false }) == "|3|2|false")
+    assert(
+        render("{{ missing }}|{{ n }}|{{ f }}|{{ b }}", { n = 3, f = 2.0, b = false })
+            == "|3|2|false"
+    )
     assert(render("\\{{ literal }}", {}) == "{{ literal }}")
 end
 
 local function paths_test()
     local ctx = { user = { name = "Ada", tags = { "x", "y" } }, ["weird key"] = 1 }
     assert(render("{{ user.name }} {{ user.tags.2 }} {{ [weird key] }}", ctx) == "Ada y 1")
-    assert(render("{{#with user}}{{ name }} {{ this.name }} {{ ../user.name }}{{/with}}", ctx) == "Ada Ada Ada")
+    assert(
+        render("{{#with user}}{{ name }} {{ this.name }} {{ ../user.name }}{{/with}}", ctx)
+            == "Ada Ada Ada"
+    )
 end
 
 local function if_unless_test()
     local tpl = template.compile("{{#if ok}}yes{{else}}no{{/if}}")
     assert(tpl({ ok = true }) == "yes")
+
     for _, v in ipairs({ false, "", 0, {} }) do
         assert(tpl({ ok = v }) == "no")
     end
+
     assert(tpl({}) == "no")
     assert(render("{{#if n includeZero=true}}zero{{/if}}", { n = 0 }) == "zero")
     assert(render("{{#unless ok}}hidden{{/unless}}", { ok = false }) == "hidden")
@@ -50,16 +60,24 @@ local function else_if_chain_test()
 end
 
 local function each_test()
-    local list = render("{{#each items}}{{@index}}:{{ this }}{{#if @first}}(first){{/if}}{{#if @last}}(last){{/if}} {{/each}}",
-        { items = { "a", "b", "c" } })
+    local list = render(
+        "{{#each items}}{{@index}}:{{ this }}{{#if @first}}(first){{/if}}{{#if @last}}(last){{/if}} {{/each}}",
+        { items = { "a", "b", "c" } }
+    )
     assert(list == "1:a(first) 2:b 3:c(last) ", list)
-    local map = render("{{#each scores}}{{@key}}={{ this }};{{/each}}", { scores = { b = 2, a = 1 } })
+    local map = render("{{#each scores}}{{@key}}={{ this }};{{/each}}", {
+        scores = { b = 2, a = 1 },
+    })
     assert(map == "a=1;b=2;")
     assert(render("{{#each items}}x{{else}}empty{{/each}}", { items = {} }) == "empty")
-    local nested = render("{{#each rows}}{{#each this}}{{ this }}{{/each}}|{{/each}}", { rows = { { 1, 2 }, { 3 } } })
+    local nested = render("{{#each rows}}{{#each this}}{{ this }}{{/each}}|{{/each}}", {
+        rows = { { 1, 2 }, { 3 } },
+    })
     assert(nested == "12|3|")
-    assert(render("{{#each people}}{{ name }} of {{ ../team }}, {{/each}}", { team = "lus", people = { { name = "a" }, { name = "b" } } })
-        == "a of lus, b of lus, ")
+    assert(render("{{#each people}}{{ name }} of {{ ../team }}, {{/each}}", {
+        team = "lus",
+        people = { { name = "a" }, { name = "b" } },
+    }) == "a of lus, b of lus, ")
 end
 
 local function sections_test()
@@ -86,65 +104,115 @@ end
 local function helpers_test()
     local env = template.env({
         helpers = {
-            upper = function(s) return s:upper() end,
-            link = function(url, text, options)
-                return template.safe(`<a href="$(template.escape(url))" class="$(template.escape(options.hash.class or ""))">$(template.escape(text))</a>`)
+            upper = function(s)
+                return s:upper()
             end,
-            bold = function(options) return template.safe(`<b>$(options.fn())</b>`) end,
+            link = function(url, text, options)
+                return template.safe(
+                    `<a href="$(template.escape(url))" class="$(template.escape(
+                        options.hash.class or ""
+                    ))">$(template.escape(text))</a>`
+                )
+            end,
+            bold = function(options)
+                return template.safe(`<b>$(options.fn())</b>`)
+            end,
         },
     })
+
     assert(env:compile("{{ upper name }}")({ name = "<x>" }) == "&lt;X&gt;")
-    assert(env:compile('{{ link url "Home & away" class="nav" }}')({ url = "/a?b=1&c=2" })
-        == '<a href="/a?b&#x3D;1&amp;c&#x3D;2" class="nav">Home &amp; away</a>')
+    assert(
+        env:compile('{{ link url "Home & away" class="nav" }}')({ url = "/a?b=1&c=2" })
+            == '<a href="/a?b&#x3D;1&amp;c&#x3D;2" class="nav">Home &amp; away</a>'
+    )
     assert(env:compile("{{#bold}}{{ x }}{{/bold}}")({ x = "<y>" }) == "<b>&lt;y&gt;</b>")
-    assert(env:compile("{{ upper (lookup names key) }}")({ names = { a = "ada" }, key = "a" }) == "ADA")
-    assert(env:compile("{{#if (eq a b)}}same{{/if}}{{#if (gt n 3)}} big{{/if}}")({ a = 1, b = 1, n = 5 }) == "same big")
+    assert(
+        env:compile("{{ upper (lookup names key) }}")({ names = { a = "ada" }, key = "a" }) == "ADA"
+    )
+    assert(env:compile("{{#if (eq a b)}}same{{/if}}{{#if (gt n 3)}} big{{/if}}")({
+        a = 1,
+        b = 1,
+        n = 5,
+    }) == "same big")
     assert(env:compile("{{ json data }}")({ data = { 1, 2 } }) == "[1,2]")
 end
 
 local function custom_block_helper_test()
     local env = template.env()
+
     env:helper("repeat", function(n, options)
         local out = {}
+
         for i = 1, n do
             out[i] = options.fn(options.frame.ctx, { data = { n = i } })
         end
+
         return table.concat(out, ",")
     end)
+
     assert(env:compile("{{#repeat 3}}{{@n}}{{ word }}{{/repeat}}")({ word = "x" }) == "1x,2x,3x")
 end
 
 local function partials_test()
-    local env = template.env({ partials = { user = "<span>{{ name }}</span>", item = "[{{ label }}]" } })
+    local env = template.env({
+        partials = { user = "<span>{{ name }}</span>", item = "[{{ label }}]" },
+    })
     assert(env:compile("{{> user }}")({ name = "Ada" }) == "<span>Ada</span>")
     assert(env:compile("{{> user person }}")({ person = { name = "Lin" } }) == "<span>Lin</span>")
     assert(env:compile('{{> item label="x" }}')({}) == "[x]")
-    assert(env:compile("<div>\n  {{> user }}\n</div>")({ name = "A" }) == "<div>\n  <span>A</span></div>")
-    err_of(function() return env:compile("{{> nope }}")({}) end)
+    assert(
+        env:compile("<div>\n  {{> user }}\n</div>")({ name = "A" })
+            == "<div>\n  <span>A</span></div>"
+    )
+
+    err_of(function()
+        return env:compile("{{> nope }}")({})
+    end)
 end
 
 local function data_test()
-    assert(render("{{ @site }}: {{ title }}", { title = "t" }, { data = { site = "lus.dev" } }) == "lus.dev: t")
+    assert(
+        render("{{ @site }}: {{ title }}", { title = "t" }, { data = { site = "lus.dev" } })
+            == "lus.dev: t"
+    )
     assert(render("{{#each l}}{{ @root.title }}{{/each}}", { title = "T", l = { 1, 2 } }) == "TT")
 end
 
 local function compile_errors_test()
-    assert(err_of(template.compile, "{{#if x}}open").message == "html_template: line 1: unclosed block 'if'")
-    assert(err_of(template.compile, "a\n{{#each x}}{{/if}}").message == "html_template: line 2: '{{/if}}' closes the block 'each'")
+    assert(
+        err_of(template.compile, "{{#if x}}open").message
+            == "html_template: line 1: unclosed block 'if'"
+    )
+    assert(
+        err_of(template.compile, "a\n{{#each x}}{{/if}}").message
+            == "html_template: line 2: '{{/if}}' closes the block 'each'"
+    )
     assert(err_of(template.compile, "{{ x").message:find("unclosed tag", 1, true))
     assert(err_of(template.compile, "{{else}}").message:find("outside a block", 1, true))
-    assert(err_of(template.compile, "{{#if a}}{{else}}{{else}}{{/if}}").message:find("more than one", 1, true))
-    local e = err_of(function() return template.compile("\n\n{{ nope 1 }}")({}) end)
+    assert(
+        err_of(template.compile, "{{#if a}}{{else}}{{else}}{{/if}}").message:find(
+            "more than one",
+            1,
+            true
+        )
+    )
+
+    local e = err_of(function()
+        return template.compile("\n\n{{ nope 1 }}")({})
+    end)
+
     assert(e.line == 3 and e.message:find("unknown helper 'nope'", 1, true))
 end
 
 local function env_files_test()
     local dir = os.tmpname() .. ".d"
     fs.createdirectory(dir)
+
     local function write(name, text)
         local f <close> = io.open(`$dir/$name`, "w")
         f:write(text)
     end
+
     write("page.hbs", "<h1>{{ title }}</h1>{{> footer }}")
     write("footer.hbs", "<footer>{{ year }}</footer>")
     local env = template.env({ root = dir })
@@ -156,7 +224,10 @@ local function env_files_test()
 end
 
 local function global_helpers_test()
-    template.helper("shout", function(s) return s .. "!" end)
+    template.helper("shout", function(s)
+        return s .. "!"
+    end)
+
     template.register_partial("hi", "hi {{ name }}")
     assert(render("{{ shout word }} {{> hi }}", { word = "go", name = "x" }) == "go! hi x")
 end
@@ -171,7 +242,11 @@ local function benchmark_page_test()
 </table>
 ]])
     local out = tpl({ items = { { id = 1, title = "A & B", tags = { "<hot>", "new" } } } })
-    assert(out == "<table>\n<tr><td>1</td><td>A &amp; B</td><td>&lt;hot&gt;, new</td></tr>\n</table>\n", out)
+    assert(
+        out
+            == "<table>\n<tr><td>1</td><td>A &amp; B</td><td>&lt;hot&gt;, new</td></tr>\n</table>\n",
+        out
+    )
 end
 
 local function section_renders_twice_test()
@@ -181,6 +256,10 @@ local function section_renders_twice_test()
 end
 
 local function data_inherits_through_blocks_test()
-    local out = render("{{#each l}}{{#with this}}{{ @site }}{{@index}}{{/with}}{{/each}}", { l = { { x = 1 }, { x = 2 } } }, { data = { site = "s" } })
+    local out = render(
+        "{{#each l}}{{#with this}}{{ @site }}{{@index}}{{/with}}{{/each}}",
+        { l = { { x = 1 }, { x = 2 } } },
+        { data = { site = "s" } }
+    )
     assert(out == "s1s2", out)
 end

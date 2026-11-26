@@ -1,17 +1,9 @@
-# html_template
+# [html_template](https://atmosp.here/2.0/html_template)
 
-`html_template` renders HTML from templates with the syntax of Handlebars. `{{name}}` inserts an escaped value and `{{{name}}}` an unescaped one. The block helpers `if`, `unless`, `each`, and `with` choose and repeat parts of a template. An environment holds helpers and partials and may load templates from files.
+Handlebars templates for Lus.
 
-The following example renders the heading and the dishes of a menu, escaping the ampersand in the title.
+[Instructions for using html_template can be found here.](https://atmosp.here/2.0/html_template)
 
-```lus nocheck
-local template = require("https://atmosp.here/2.0/html_template.lus")
+## License
 
-local page = template.compile("<h1>{{ title }}</h1><ul>{{#each items}}<li>{{ name }}</li>{{/each}}</ul>")
-print(page({ title = "Fish & Chips", items = { { name = "Cod" }, { name = "Haddock" } } }))
---> <h1>Fish &amp; Chips</h1><ul><li>Cod</li><li>Haddock</li></ul>
-```
-
-The package requires Lus 2.0 and declares the permission `fs:read`, which only an environment that loads template files from its root directory uses. It never calls `pledge`, so the program that loads it keeps control of its permissions.
-
-The reference is in the doc comments of `html_template.lus`, which `lus doc html_template.lus` prints.
+`html_template` is licensed under the 0-clause BSD license. It may be used for any purpose, including commercial purposes, at no cost. [For more details, consult the license here.](LICENSE)

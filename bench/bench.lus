@@ -7,33 +7,61 @@ local template = require("html_template")
 
 local N = tonumber(arg[1]) or 200000
 local state = 42
+
 local function rand(n)
     state = (state * 48271) % 2147483647
     return state % n
 end
+
 local TAGS = { "new", "sale", "<hot>", "a&b", '"quoted"', "it's", "x>y", "plain" }
 local items = {}
+
 for id = 1, N do
     local tags = {}
-    for j = 1, rand(3) + 1 do tags[j] = TAGS[rand(8) + 1] end
+
+    for j = 1, rand(3) + 1 do
+        tags[j] = TAGS[rand(8) + 1]
+    end
+
     local price = rand(100000)
-    items[id] = { id = id, title = `Item $id & $(rand(1000)) $(TAGS[rand(8) + 1])`, tags = tags,
-        dollars = price // 100, cents = string.format("%02d", price % 100) }
+    items[id] = {
+        id = id,
+        title = `Item $id & $(rand(1000)) $(TAGS[rand(8) + 1])`,
+        tags = tags,
+        dollars = price // 100,
+        cents = string.format("%02d", price % 100),
+    }
 end
 
 local ESC = { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;", ['"'] = "&quot;", ["'"] = "&#39;" }
-local function escape(s) return (string.gsub(s, "[&<>\"']", ESC)) end
+
+local function escape(s)
+    return (string.gsub(s, "[&<>\"']", ESC))
+end
+
 local function by_hand(list)
     local out = { "<table>\n" }
     local n = 1
+
     for i = 1, #list do
         local item = list[i]
         local escaped = {}
-        for j = 1, #item.tags do escaped[j] = escape(item.tags[j]) end
+
+        for j = 1, #item.tags do
+            escaped[j] = escape(item.tags[j])
+        end
+
         n = n + 1
-        out[n] = string.format("<tr><td>%d</td><td>%s</td><td>$%d.%s</td><td>%s</td></tr>\n",
-            item.id, escape(item.title), item.dollars, item.cents, table.concat(escaped, ", "))
+        out[n] = string.format(
+            "<tr><td>%d</td><td>%s</td><td>$%d.%s</td><td>%s</td></tr>\n",
+            item.id,
+            escape(item.title),
+            item.dollars,
+            item.cents,
+            table.concat(escaped, ", ")
+        )
     end
+
     out[n + 1] = "</table>\n"
     return table.concat(out)
 end
@@ -53,5 +81,11 @@ local function time_it(name, fn)
     print(string.format("%-14s %.3f s  %d bytes", name, os.clock() - t, #out))
     return out
 end
-time_it("table.concat", function() return by_hand(items) end)
-time_it("html_template", function() return page({ items = items }) end)
+
+time_it("table.concat", function()
+    return by_hand(items)
+end)
+
+time_it("html_template", function()
+    return page({ items = items })
+end)
